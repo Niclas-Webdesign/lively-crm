@@ -259,6 +259,83 @@
     .email-body { font-size: 14px; line-height: 1.7; }
     .copy-email-btn { padding: 14px; font-size: 15px; }
   }
+
+  /* ── Anmerkungen-Block (nur Neue Leads) ── */
+  .notes-section {
+    margin-top: 18px;
+    border-top: 2px dashed #2a5a3a;
+    padding-top: 14px;
+  }
+  .notes-section-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #7fff9a;
+    font-weight: bold;
+    font-size: 14px;
+    margin-bottom: 10px;
+    letter-spacing: 0.3px;
+  }
+  .notes-textarea {
+    width: 100%;
+    background: #071810;
+    border: 1px solid #2a5a3a;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 14px;
+    color: #c8e8d0;
+    line-height: 1.65;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    resize: vertical;
+    min-height: 72px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    box-sizing: border-box;
+  }
+  .notes-textarea:focus { border-color: #4aaa6a; box-shadow: 0 0 0 2px rgba(74,170,106,0.15); }
+  .notes-textarea::placeholder { color: #2a5a3a; font-style: italic; }
+  .review-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding: 9px 16px;
+    background: transparent;
+    border: 2px solid #3a3a1a;
+    border-radius: 8px;
+    color: #a0a060;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .review-btn:hover { background: #1e1e08; border-color: #7a7a30; color: #d4d47a; }
+  .review-btn.active {
+    background: #2a2a08;
+    border-color: #C6A75E;
+    color: #C6A75E;
+  }
+  /* Goldener Rahmen + Glow wenn "erneut prüfen" aktiv */
+  .lead-card.needs-review {
+    border-color: #C6A75E !important;
+    box-shadow: 0 0 10px rgba(198,167,94,0.25);
+  }
+  .review-badge {
+    display: inline-block;
+    background: #2a2a08;
+    border: 1px solid #C6A75E;
+    color: #C6A75E;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 2px 9px;
+    border-radius: 10px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  @media (max-width: 600px) {
+    .notes-textarea { font-size: 15px; min-height: 88px; }
+    .review-btn { font-size: 14px; padding: 12px 14px; width: 100%; justify-content: center; }
+  }
 </style>
 </head>
 <body>
@@ -420,7 +497,28 @@ function buildLeadCard(lead, ls, isNew) {
       emailBlockHtml +
     '</div>';
 
-  return '<div class="lead-card ' + statusClass + '" id="card-' + esc(lead.id) + '">' + miniHtml + contentHtml + '</div>';
+  // "Erneut prüfen"-Klasse nur bei neuen Leads mit aktiver Markierung
+  const reviewClass = (isNew && ls.needsReview) ? ' needs-review' : '';
+
+  // Anmerkungen-Block: nur sichtbar bei neuen Leads
+  let notesBlockHtml = '';
+  if (isNew) {
+    const savedNotes  = (ls.notes || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const reviewActive = ls.needsReview || false;
+    notesBlockHtml =
+      '<div class="notes-section">' +
+        '<div class="notes-section-label">📝 Anmerkungen</div>' +
+        '<textarea class="notes-textarea" id="notes-' + esc(lead.id) + '" ' +
+          'placeholder="Notizen, Korrekturen, Website-Links …" ' +
+          'oninput="saveNote('' + esc(lead.id) + '', this.value)">' + savedNotes + '</textarea>' +
+        '<button class="review-btn' + (reviewActive ? ' active' : '') + '" ' +
+          'onclick="toggleReview('' + esc(lead.id) + '')">' +
+          (reviewActive ? '🔔 Erneut prüfen – markiert' : '🔔 Lead erneut prüfen') +
+        '</button>' +
+      '</div>';
+  }
+
+  return '<div class="lead-card ' + statusClass + reviewClass + '" id="card-' + esc(lead.id) + '">' + miniHtml + contentHtml + notesBlockHtml + '</div>';
 }
 
 function buildSection(titleHtml, cssClass, cardsHtml) {
@@ -434,19 +532,27 @@ function buildSection(titleHtml, cssClass, cardsHtml) {
 function render() {
   const state = loadState();
   let newCards = '', gewCards = '', nichtCards = '', verlCards = '';
-  let newCount = 0, gewCount = 0, nichtCount = 0, verlCount = 0;
+  let newCount = 0, gewCount = 0, nichtCount = 0, verlCount = 0, reviewCount = 0;
 
   for (const lead of LEADS) {
     const ls = getLeadState(state, lead.id);
     if (ls.deleted) continue;
-    if      (ls.status === null)                { newCards   += buildLeadCard(lead, ls, true);  newCount++;   }
+    if      (ls.status === null)                {
+      newCards += buildLeadCard(lead, ls, true);
+      newCount++;
+      if (ls.needsReview) reviewCount++;
+    }
     else if (ls.status === 'gewonnen')          { gewCards   += buildLeadCard(lead, ls, false); gewCount++;   }
     else if (ls.status === 'nicht-rangegangen') { nichtCards += buildLeadCard(lead, ls, false); nichtCount++; }
     else if (ls.status === 'verloren')          { verlCards  += buildLeadCard(lead, ls, false); verlCount++;  }
   }
 
   document.getElementById('section-new').innerHTML =
-    buildSection('📋 Neue Leads <span class="count-badge">' + newCount + '</span>', 'new', newCards);
+    buildSection(
+      '📋 Neue Leads <span class="count-badge">' + newCount + '</span>' +
+      (reviewCount > 0 ? '<span class="review-badge">🔔 ' + reviewCount + ' zu prüfen</span>' : ''),
+      'new', newCards
+    );
   document.getElementById('section-gewonnen').innerHTML =
     buildSection('✅ Gewonnen <span class="count-badge">' + gewCount + '</span>', 'gewonnen', gewCards);
   document.getElementById('section-nicht').innerHTML =
@@ -486,6 +592,26 @@ function startCountdownClock() {
   }, 1000);
 }
 
+
+
+// Speichert die Anmerkung eines Leads in localStorage (kein Re-Render nötig)
+function saveNote(leadId, text) {
+  const state = loadState();
+  const ls = getLeadState(state, leadId);
+  ls.notes = text;
+  state[leadId] = ls;
+  saveState(state);
+}
+
+// Schaltet die "Erneut prüfen"-Markierung um und aktualisiert die Ansicht
+function toggleReview(leadId) {
+  const state = loadState();
+  const ls = getLeadState(state, leadId);
+  ls.needsReview = !ls.needsReview;
+  state[leadId] = ls;
+  saveState(state);
+  render();
+}
 
 // Extrahiert den reinen Vornamen/Namen aus dem owner-Feld ("Max Müller (Inhaber)" → "Max Müller")
 function extractOwnerName(ownerStr) {
