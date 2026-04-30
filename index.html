@@ -505,17 +505,20 @@ function buildLeadCard(lead, ls, isNew) {
   if (isNew) {
     const savedNotes  = (ls.notes || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const reviewActive = ls.needsReview || false;
-    notesBlockHtml =
-      '<div class="notes-section">' +
-        '<div class="notes-section-label">📝 Anmerkungen</div>' +
-        '<textarea class="notes-textarea" id="notes-' + esc(lead.id) + '" ' +
-          'placeholder="Notizen, Korrekturen, Website-Links …" ' +
-          'oninput="saveNote('' + esc(lead.id) + '', this.value)">' + savedNotes + '</textarea>' +
-        '<button class="review-btn' + (reviewActive ? ' active' : '') + '" ' +
-          'onclick="toggleReview('' + esc(lead.id) + '')">' +
-          (reviewActive ? '🔔 Erneut prüfen – markiert' : '🔔 Lead erneut prüfen') +
-        '</button>' +
-      '</div>';
+    notesBlockHtml = [
+      '<div class="notes-section">',
+      '<div class="notes-section-label">📝 Anmerkungen</div>',
+      '<textarea class="notes-textarea" id="notes-' + esc(lead.id) + '"',
+      ' placeholder="Notizen, Korrekturen, Website-Links …"',
+      ' oninput="saveNote(\'' + esc(lead.id) + '\', this.value)">',
+      savedNotes,
+      '</textarea>',
+      '<button class="review-btn' + (reviewActive ? ' active' : '') + '"',
+      ' onclick="toggleReview(\'' + esc(lead.id) + '\')">',
+      reviewActive ? '🔔 Erneut prüfen – markiert' : '🔔 Lead erneut prüfen',
+      '</button>',
+      '</div>'
+    ].join('');
   }
 
   return '<div class="lead-card ' + statusClass + reviewClass + '" id="card-' + esc(lead.id) + '">' + miniHtml + contentHtml + notesBlockHtml + '</div>';
