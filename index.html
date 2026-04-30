@@ -197,6 +197,68 @@
     .status-btn { padding: 14px 10px; font-size: 14px; flex: 1; text-align: center; border-radius: 8px; }
     .status-badge { font-size: 11px; padding: 3px 8px; }
   }
+
+  /* ── Follow-up E-Mail Block ── */
+  .email-section {
+    margin-top: 18px;
+    border-top: 2px dashed #3a5a7a;
+    padding-top: 14px;
+  }
+  .email-section-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #7fbfff;
+    font-weight: bold;
+    font-size: 14px;
+    margin-bottom: 10px;
+    letter-spacing: 0.3px;
+  }
+  .email-subject {
+    background: #0d2a40;
+    border-left: 3px solid #7fbfff;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: #aaddff;
+    margin-bottom: 8px;
+    font-weight: bold;
+  }
+  .email-body {
+    background: #0a1e30;
+    border: 1px solid #1e4060;
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-size: 13px;
+    color: #c8d8e8;
+    white-space: pre-wrap;
+    line-height: 1.65;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    user-select: text;
+  }
+  .copy-email-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    margin-top: 10px;
+    padding: 11px 18px;
+    background: #1a3a5c;
+    color: #7fbfff;
+    border: 2px solid #3a6a9a;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .copy-email-btn:hover { background: #2a5a8a; color: #fff; }
+  .copy-email-btn.copied { background: #1a5c2a; color: #7fff9a; border-color: #2a8a40; }
+  @media (max-width: 600px) {
+    .email-body { font-size: 14px; line-height: 1.7; }
+    .copy-email-btn { padding: 14px; font-size: 15px; }
+  }
 </style>
 </head>
 <body>
@@ -333,6 +395,19 @@ function buildLeadCard(lead, ls, isNew) {
     ? '<a class="call-btn" href="tel:' + phoneMatch[1].replace(/[\s\/\-]/g,'') + '">📞 Jetzt anrufen – ' + phoneMatch[1].trim() + '</a>'
     : '';
 
+  // E-Mail-Block nur für "Nicht rangegangen"-Leads generieren
+  let emailBlockHtml = '';
+  if (ls.status === 'nicht-rangegangen') {
+    const email = generateEmail(lead);
+    emailBlockHtml =
+      '<div class="email-section">' +
+        '<div class="email-section-label">✉️ Follow-up E-Mail</div>' +
+        '<div class="email-subject" id="email-subject-' + esc(lead.id) + '">' + esc(email.subject) + '</div>' +
+        '<div class="email-body" id="email-body-' + esc(lead.id) + '">' + esc(email.body) + '</div>' +
+        '<button class="copy-email-btn" id="copy-btn-' + esc(lead.id) + '" onclick="copyEmail('' + esc(lead.id) + '')">📋 E-Mail kopieren</button>' +
+      '</div>';
+  }
+
   const contentHtml =
     '<div class="lead-content" id="content-' + esc(lead.id) + '"' + contentStyle + '>' +
       callBtnHtml +
@@ -342,6 +417,7 @@ function buildLeadCard(lead, ls, isNew) {
         btn('nicht-rangegangen', '📵 Nicht rangegangen', 'nicht-rangegangen') +
         btn('verloren',          '❌ Verloren',          'verloren') +
       '</div>' +
+      emailBlockHtml +
     '</div>';
 
   return '<div class="lead-card ' + statusClass + '" id="card-' + esc(lead.id) + '">' + miniHtml + contentHtml + '</div>';
@@ -408,6 +484,93 @@ function startCountdownClock() {
       el.textContent = '🗑 ' + formatCountdown(rem);
     });
   }, 1000);
+}
+
+
+// Extrahiert den reinen Vornamen/Namen aus dem owner-Feld ("Max Müller (Inhaber)" → "Max Müller")
+function extractOwnerName(ownerStr) {
+  if (!ownerStr) return null;
+  const m = ownerStr.match(/^([^(]+)/);
+  return m ? m[1].trim() : ownerStr.trim();
+}
+
+// Extrahiert Text nach einem Emoji-Marker aus dem Lead-HTML
+function extractFromHtml(leadHtml, emoji) {
+  const regex = new RegExp(emoji + '\\s*([^<]+)');
+  const m = leadHtml.match(regex);
+  return m ? m[1].trim() : null;
+}
+
+// Generiert den Follow-up-E-Mail-Text auf Basis der Lead-Daten
+function generateEmail(lead) {
+  const ownerFull = extractOwnerName(lead.owner);
+  const greeting  = ownerFull ? 'Hallo ' + ownerFull.split(' ')[0] : 'Hallo';
+  const company   = lead.company || '';
+
+  const websiteRaw = extractFromHtml(lead.html, '🌐');
+  const branche    = extractFromHtml(lead.html, '🏷️')?.replace('Branche:', '').trim() || '';
+
+  // Problem-spezifischer Satz
+  let problemSatz = 'Ihre Online-Präsenz lässt sich gezielt verbessern, um mehr Anfragen zu gewinnen.';
+  if (websiteRaw) {
+    const wl = websiteRaw.toLowerCase();
+    if (wl.includes('keine website') || wl.includes('keine eigene') || wl.includes('keinerlei'))
+      problemSatz = 'Mir ist aufgefallen, dass ' + company + ' aktuell keine eigene Website hat – das bedeutet, potenzielle Kunden finden Sie online schlicht nicht.';
+    else if (wl.includes('offline') || wl.includes('nicht erreichbar'))
+      problemSatz = 'Ich habe festgestellt, dass Ihre Website gerade offline ist – das kostet täglich potenzielle Neukunden.';
+    else if (wl.includes('ssl') || wl.includes('sicherheitswarnung'))
+      problemSatz = 'Beim Aufruf Ihrer Website erscheint im Browser eine Sicherheitswarnung – das schreckt viele Besucher sofort ab.';
+    else if (wl.includes('veraltet') || wl.includes('mobil') || wl.includes('2000') || wl.includes('http://'))
+      problemSatz = 'Ihre Website wirkt optisch veraltet und ist auf dem Smartphone kaum nutzbar – das kostet aktiv Neukunden.';
+  }
+
+  const brancheSatz = branche
+    ? 'Als ' + branche + ' wissen Sie: Neukunden informieren sich heute zuerst online, bevor sie anrufen.'
+    : 'Neukunden informieren sich heute zuerst online, bevor sie anrufen.';
+
+  const subject = 'Kurze Rückmeldung zu Ihrer Online-Präsenz – ' + company;
+
+  const body =
+    greeting + ',\n\n' +
+    'ich habe heute versucht, Sie telefonisch zu erreichen – leider ohne Erfolg.\n\n' +
+    problemSatz + '\n\n' +
+    brancheSatz + ' Ich helfe Unternehmen dabei, professioneller online aufzutreten, besser gefunden zu werden und aus Besuchern echte Kundenanfragen zu machen.\n\n' +
+    'Falls das für Sie interessant klingt, würde ich mich über eine kurze Rückmeldung freuen – ein 5-minütiges Gespräch reicht völlig aus.\n\n' +
+    'Viele Grüße\n' +
+    'Niclas Schwiering\n' +
+    'LivelyVision – Webdesign & SEO\n' +
+    'niclas@schwiering.com';
+
+  return { subject, body };
+}
+
+// Kopiert Betreff + E-Mail-Text in die Zwischenablage und zeigt Feedback
+function copyEmail(leadId) {
+  const subjectEl = document.getElementById('email-subject-' + leadId);
+  const bodyEl    = document.getElementById('email-body-'    + leadId);
+  const btn       = document.getElementById('copy-btn-'      + leadId);
+  if (!subjectEl || !bodyEl || !btn) return;
+
+  const fullText = 'Betreff: ' + subjectEl.textContent + '\n\n' + bodyEl.textContent;
+  navigator.clipboard.writeText(fullText).then(() => {
+    btn.textContent = '✅ E-Mail kopiert';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = '📋 E-Mail kopieren';
+      btn.classList.remove('copied');
+    }, 2200);
+  }).catch(() => {
+    // Fallback für ältere Browser
+    const ta = document.createElement('textarea');
+    ta.value = fullText;
+    ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    btn.textContent = '✅ E-Mail kopiert';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '📋 E-Mail kopieren'; btn.classList.remove('copied'); }, 2200);
+  });
 }
 
 render();
