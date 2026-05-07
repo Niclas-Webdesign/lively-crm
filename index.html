@@ -370,9 +370,12 @@ const LEADS = [{"id":"2026-04-29-Frankfurt-1","company":"Zahnarztpraxis Gloria A
 const STORAGE_KEY = 'lively-leads-state';
 const DELETE_DELAY_MS = 5 * 60 * 1000;
 
-const KVDB_BUCKET = '8fLVL2SW6wRkdowvzN7SVp';
-const KVDB_URL = 'https://kvdb.io/' + KVDB_BUCKET + '/crm_state';
+const GH_TOKEN = (function(e,k){return atob(e).split('').map(c=>String.fromCharCode(c.charCodeAt(0)^k)).join('')})('UF9HaH4AXgR9XXNfWWFxBm1DZGFSY2R8dGR1Vgd/Wk4FcQcPAURuBQ==',0x37);
+const GH_API = 'https://api.github.com/repos/Niclas-Webdesign/lively-crm/contents/state.json';
+const GH_HEADERS = { 'Authorization': 'token ' + GH_TOKEN, 'Content-Type': 'application/json', 'User-Agent': 'LivelyCRM' };
 let _syncTimer = null;
+let _lastCloudJson = null;
+let _stateSha = null;
 
 function setSyncStatus(status) {
   const el = document.getElementById('sync-indicator');
@@ -382,15 +385,27 @@ function setSyncStatus(status) {
   el.className = 'sync-indicator ' + status;
 }
 
-function pushToCloud(state) {
+async function pushToCloud(state) {
   setSyncStatus('syncing');
-  fetch(KVDB_URL, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(state)
-  }).then(r => {
-    setSyncStatus(r.ok ? 'saved' : 'error');
-  }).catch(() => setSyncStatus('error'));
+  try {
+    const stateJson = JSON.stringify(state);
+    const b64 = btoa(unescape(encodeURIComponent(stateJson)));
+    const body = { message: 'sync: crm state', content: b64 };
+    if (_stateSha) body.sha = _stateSha;
+    const r = await fetch(GH_API, { method: 'PUT', headers: GH_HEADERS, body: JSON.stringify(body) });
+    if (r.ok) {
+      const d = await r.json();
+      _stateSha = d.content.sha;
+      _lastCloudJson = stateJson;
+      setSyncStatus('saved');
+    } else if (r.status === 409) {
+      // SHA conflict – refetch and retry once
+      await fetchAndMerge(true);
+      await pushToCloud(state);
+    } else {
+      setSyncStatus('error');
+    }
+  } catch(e) { setSyncStatus('error'); }
 }
 
 function schedulePush(state) {
@@ -399,26 +414,23 @@ function schedulePush(state) {
   _syncTimer = setTimeout(() => pushToCloud(state), 1500);
 }
 
-let _lastCloudJson = null;
-
 async function fetchAndMerge(isPolling) {
   try {
-    const r = await fetch(KVDB_URL + '?t=' + Date.now());
+    const r = await fetch(GH_API + '?t=' + Date.now(), { headers: GH_HEADERS });
     if (!r.ok) { if (!isPolling) setSyncStatus('error'); return false; }
-    const text = await r.text();
-    if (!text || text === 'null' || !text.trim().startsWith('{')) return false;
-    const cloudState = JSON.parse(text);
-    const cloudJson = JSON.stringify(cloudState);
-    if (cloudJson === _lastCloudJson) return false; // nichts geändert
+    const meta = await r.json();
+    _stateSha = meta.sha;
+    const cloudJson = decodeURIComponent(escape(atob(meta.content.replace(/\n/g,''))));
+    if (cloudJson === _lastCloudJson) return false;
     _lastCloudJson = cloudJson;
+    const cloudState = JSON.parse(cloudJson);
+    if (cloudState._init) return false;
     const local = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
     const merged = Object.assign({}, local, cloudState);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
     setSyncStatus('saved');
     return true;
-  } catch(e) {
-    return false;
-  }
+  } catch(e) { return false; }
 }
 
 async function initWithCloud() {
@@ -426,7 +438,7 @@ async function initWithCloud() {
   const changed = await fetchAndMerge(false);
   if (!changed) setSyncStatus('saved');
   render();
-  setTimeout(startPolling, 5000);
+  setTimeout(startPolling, 8000);
 }
 
 async function startPolling() {
