@@ -399,26 +399,40 @@ function schedulePush(state) {
   _syncTimer = setTimeout(() => pushToCloud(state), 1500);
 }
 
-async function initWithCloud() {
+let _lastCloudJson = null;
+
+async function fetchAndMerge(isPolling) {
   try {
-    setSyncStatus('syncing');
-    const r = await fetch(KVDB_URL);
-    if (r.ok) {
-      const text = await r.text();
-      if (text && text !== 'null' && text.trim().startsWith('{')) {
-        const cloudState = JSON.parse(text);
-        const local = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-        const merged = Object.assign({}, local, cloudState);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-      }
-      setSyncStatus('saved');
-    } else {
-      setSyncStatus('error');
-    }
+    const r = await fetch(KVDB_URL + '?t=' + Date.now());
+    if (!r.ok) { if (!isPolling) setSyncStatus('error'); return false; }
+    const text = await r.text();
+    if (!text || text === 'null' || !text.trim().startsWith('{')) return false;
+    const cloudState = JSON.parse(text);
+    const cloudJson = JSON.stringify(cloudState);
+    if (cloudJson === _lastCloudJson) return false; // nichts geändert
+    _lastCloudJson = cloudJson;
+    const local = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    const merged = Object.assign({}, local, cloudState);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    setSyncStatus('saved');
+    return true;
   } catch(e) {
-    setSyncStatus('error');
+    return false;
   }
+}
+
+async function initWithCloud() {
+  setSyncStatus('syncing');
+  const changed = await fetchAndMerge(false);
+  if (!changed) setSyncStatus('saved');
   render();
+  setTimeout(startPolling, 5000);
+}
+
+async function startPolling() {
+  const changed = await fetchAndMerge(true);
+  if (changed) render();
+  setTimeout(startPolling, 20000);
 }
 
 const timers = {};
