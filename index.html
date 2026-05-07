@@ -336,6 +336,19 @@
     .notes-textarea { font-size: 15px; min-height: 88px; }
     .review-btn { font-size: 14px; padding: 12px 14px; width: 100%; justify-content: center; }
   }
+
+  .sync-indicator {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    margin-top: 6px;
+    display: inline-block;
+    transition: all 0.3s;
+  }
+  .sync-indicator.pending  { color: #aaa; }
+  .sync-indicator.syncing  { color: #C6A75E; }
+  .sync-indicator.saved    { color: #7fff9a; }
+  .sync-indicator.error    { color: #ff9a9a; }
 </style>
 </head>
 <body>
@@ -357,6 +370,57 @@ const LEADS = [{"id":"2026-04-29-Frankfurt-1","company":"Zahnarztpraxis Gloria A
 const STORAGE_KEY = 'lively-leads-state';
 const DELETE_DELAY_MS = 5 * 60 * 1000;
 
+const KVDB_BUCKET = '8fLVL2SW6wRkdowvzN7SVp';
+const KVDB_URL = 'https://kvdb.io/' + KVDB_BUCKET + '/crm_state';
+let _syncTimer = null;
+
+function setSyncStatus(status) {
+  const el = document.getElementById('sync-indicator');
+  if (!el) return;
+  const icons = { pending: '🔄 Speichern…', syncing: '☁️ Sync…', saved: '✅ Synced', error: '⚠️ Offline?' };
+  el.textContent = icons[status] || '';
+  el.className = 'sync-indicator ' + status;
+}
+
+function pushToCloud(state) {
+  setSyncStatus('syncing');
+  fetch(KVDB_URL, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(state)
+  }).then(r => {
+    setSyncStatus(r.ok ? 'saved' : 'error');
+  }).catch(() => setSyncStatus('error'));
+}
+
+function schedulePush(state) {
+  clearTimeout(_syncTimer);
+  setSyncStatus('pending');
+  _syncTimer = setTimeout(() => pushToCloud(state), 1500);
+}
+
+async function initWithCloud() {
+  try {
+    setSyncStatus('syncing');
+    const r = await fetch(KVDB_URL);
+    if (r.ok) {
+      const text = await r.text();
+      if (text && text !== 'null' && text.trim().startsWith('{')) {
+        const cloudState = JSON.parse(text);
+        const local = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+        const merged = Object.assign({}, local, cloudState);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      }
+      setSyncStatus('saved');
+    } else {
+      setSyncStatus('error');
+    }
+  } catch(e) {
+    setSyncStatus('error');
+  }
+  render();
+}
+
 const timers = {};
 
 function loadState() {
@@ -366,6 +430,7 @@ function loadState() {
 
 function saveState(state) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  schedulePush(state);
 }
 
 function getLeadState(state, id) {
@@ -702,7 +767,7 @@ function copyEmail(leadId) {
   });
 }
 
-render();
+initWithCloud();
 </script>
 </body>
 </html>
