@@ -320,6 +320,44 @@
     border-color: #C6A75E !important;
     box-shadow: 0 0 10px rgba(198,167,94,0.25);
   }
+  /* ── Sort-Navigation ── */
+  .sort-nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(10, 21, 37, 0.96);
+    backdrop-filter: blur(6px);
+    padding: 12px 0;
+    margin: 0 0 20px 0;
+    border-bottom: 1px solid #1e4070;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .sort-btn {
+    background: #1a3055;
+    border: 2px solid #3a5a80;
+    color: #aabacc;
+    padding: 10px 18px;
+    border-radius: 24px;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .sort-btn:hover { background: #2a4070; color: #fff; }
+  .sort-btn.active {
+    background: #C6A75E;
+    border-color: #C6A75E;
+    color: #0a1525;
+  }
+  @media (max-width: 600px) {
+    .sort-nav { padding: 10px 0; gap: 6px; margin: 0 -8px 16px -8px; padding-left: 8px; padding-right: 8px; }
+    .sort-btn { padding: 9px 12px; font-size: 12px; }
+  }
+
   /* ── Erneut anrufen (Callback) Block ── */
   .callback-section {
     margin-top: 18px;
@@ -448,6 +486,14 @@
   <p>Ranking nach Website-Qualität</p>
 </div>
 
+<div class="sort-nav" id="sort-nav">
+  <button class="sort-btn active" data-sort="standard" onclick="setSort('standard')">📋 Standard</button>
+  <button class="sort-btn" data-sort="callback" onclick="setSort('callback')">🔄 Rückruf</button>
+  <button class="sort-btn" data-sort="opening" onclick="setSort('opening')">🕒 Öffnungszeiten</button>
+  <button class="sort-btn" data-sort="score" onclick="setSort('score')">🏆 Score</button>
+</div>
+
+<div id="section-sorted"   class="crm-section" style="display:none"></div>
 <div id="section-new"      class="crm-section"></div>
 <div id="section-gewonnen" class="crm-section"></div>
 <div id="section-nicht"    class="crm-section"></div>
@@ -866,12 +912,13 @@ function buildLeadCard(lead, ls, isNew) {
         esc(formatCallback(ls.callback)) +
       '</div>';
   }
+  const saveBtnLabel = ls.callback ? '🔄 Aktualisieren' : '💾 Rückruf speichern';
   const callbackBlockHtml =
     '<div class="callback-section">' +
-      '<div class="callback-section-label">🔄 Erneut anrufen (Datum &amp; Zeit)</div>' +
+      '<div class="callback-section-label">🔄 Erneut anrufen' + (ls.callback ? ' (Datum/Zeit ändern und speichern)' : ' (Datum &amp; Zeit eintragen)') + '</div>' +
       '<input type="datetime-local" class="callback-input" id="callback-input-' + esc(lead.id) + '" value="' + esc(callbackValue) + '">' +
       '<div class="callback-actions">' +
-        '<button class="callback-save-btn" onclick="setCallback(\'' + esc(lead.id) + '\')">💾 Rückruf speichern</button>' +
+        '<button class="callback-save-btn" onclick="setCallback(\'' + esc(lead.id) + '\')">' + saveBtnLabel + '</button>' +
         (ls.callback ? '<button class="callback-clear-btn" onclick="clearCallback(\'' + esc(lead.id) + '\')">✕ Löschen</button>' : '') +
       '</div>' +
       callbackCurrentHtml +
@@ -927,36 +974,109 @@ function buildSection(titleHtml, cssClass, cardsHtml) {
          '<div class="crm-section-body">' + body + '</div>';
 }
 
+// ── Sort-Mode ──
+let currentSort = 'standard';
+
+function setSort(mode) {
+  currentSort = mode;
+  document.querySelectorAll('.sort-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.sort === mode);
+  });
+  render();
+}
+
+// Hilfsfunktionen für Sortierung
+function extractScore(html) {
+  const m = html.match(/Score:\s*(\d+)\s*\/\s*15/);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function extractOpeningStart(html) {
+  // Sucht im Öffnungszeiten-Absatz die erste Uhrzeit (z.B. 08:00)
+  const oeffMatch = html.match(/🕒[^<]*Öffnungszeiten[^<]*/i);
+  if (!oeffMatch) return 9999;
+  const timeMatch = oeffMatch[0].match(/(\d{1,2})[:.](\d{2})/);
+  if (!timeMatch) return 9999;
+  return parseInt(timeMatch[1], 10) * 60 + parseInt(timeMatch[2], 10);
+}
+
 function render() {
   const state = loadState();
-  let newCards = '', gewCards = '', nichtCards = '', verlCards = '';
-  let newCount = 0, gewCount = 0, nichtCount = 0, verlCount = 0, reviewCount = 0;
 
-  for (const lead of LEADS) {
-    const ls = getLeadState(state, lead.id);
-    if (ls.deleted) continue;
-    if      (ls.status === null)                {
-      newCards += buildLeadCard(lead, ls, true);
-      newCount++;
-      if (ls.needsReview) reviewCount++;
+  const sectionIds = ['section-new', 'section-gewonnen', 'section-nicht', 'section-verloren'];
+  const sortedSection = document.getElementById('section-sorted');
+
+  if (currentSort === 'standard') {
+    // Standard-Ansicht: 4 Sektionen, sortierte Ansicht aus
+    sortedSection.style.display = 'none';
+    sectionIds.forEach(id => document.getElementById(id).style.display = '');
+
+    let newCards = '', gewCards = '', nichtCards = '', verlCards = '';
+    let newCount = 0, gewCount = 0, nichtCount = 0, verlCount = 0, reviewCount = 0;
+
+    for (const lead of LEADS) {
+      const ls = getLeadState(state, lead.id);
+      if (ls.deleted) continue;
+      if      (ls.status === null)                {
+        newCards += buildLeadCard(lead, ls, true);
+        newCount++;
+        if (ls.needsReview) reviewCount++;
+      }
+      else if (ls.status === 'gewonnen')          { gewCards   += buildLeadCard(lead, ls, false); gewCount++;   }
+      else if (ls.status === 'nicht-rangegangen') { nichtCards += buildLeadCard(lead, ls, false); nichtCount++; }
+      else if (ls.status === 'verloren')          { verlCards  += buildLeadCard(lead, ls, false); verlCount++;  }
     }
-    else if (ls.status === 'gewonnen')          { gewCards   += buildLeadCard(lead, ls, false); gewCount++;   }
-    else if (ls.status === 'nicht-rangegangen') { nichtCards += buildLeadCard(lead, ls, false); nichtCount++; }
-    else if (ls.status === 'verloren')          { verlCards  += buildLeadCard(lead, ls, false); verlCount++;  }
-  }
 
-  document.getElementById('section-new').innerHTML =
-    buildSection(
-      '📋 Neue Leads <span class="count-badge">' + newCount + '</span>' +
-      (reviewCount > 0 ? '<span class="review-badge">🔔 ' + reviewCount + ' zu prüfen</span>' : ''),
-      'new', newCards
+    document.getElementById('section-new').innerHTML =
+      buildSection(
+        '📋 Neue Leads <span class="count-badge">' + newCount + '</span>' +
+        (reviewCount > 0 ? '<span class="review-badge">🔔 ' + reviewCount + ' zu prüfen</span>' : ''),
+        'new', newCards
+      );
+    document.getElementById('section-gewonnen').innerHTML =
+      buildSection('✅ Gewonnen <span class="count-badge">' + gewCount + '</span>', 'gewonnen', gewCards);
+    document.getElementById('section-nicht').innerHTML =
+      buildSection('📵 Nicht rangegangen <span class="count-badge">' + nichtCount + '</span>', 'nicht', nichtCards);
+    document.getElementById('section-verloren').innerHTML =
+      buildSection('❌ Verloren <span class="count-badge">' + verlCount + '</span>', 'verloren', verlCards);
+  } else {
+    // Sortierte Ansicht: nur eine Sektion
+    sectionIds.forEach(id => document.getElementById(id).style.display = 'none');
+    sortedSection.style.display = '';
+
+    let leads = LEADS.filter(l => !getLeadState(state, l.id).deleted);
+    let titleText = '';
+    let titleCls = 'new';
+
+    if (currentSort === 'callback') {
+      leads = leads.filter(l => getLeadState(state, l.id).callback);
+      leads.sort((a, b) => {
+        const ta = new Date(getLeadState(state, a.id).callback).getTime();
+        const tb = new Date(getLeadState(state, b.id).callback).getTime();
+        return ta - tb;
+      });
+      titleText = '🔄 Sortiert nach Rückruf (früheste zuerst)';
+    } else if (currentSort === 'opening') {
+      leads.sort((a, b) => extractOpeningStart(a.html) - extractOpeningStart(b.html));
+      titleText = '🕒 Sortiert nach Öffnungszeiten (früh → spät)';
+    } else if (currentSort === 'score') {
+      leads.sort((a, b) => extractScore(b.html) - extractScore(a.html));
+      titleText = '🏆 Sortiert nach Score (hoch → niedrig)';
+    }
+
+    let cards = '';
+    for (const lead of leads) {
+      const ls = getLeadState(state, lead.id);
+      // In sortierter Ansicht starten alle Karten eingeklappt (Mini-View)
+      cards += buildLeadCard(lead, ls, false);
+    }
+
+    sortedSection.innerHTML = buildSection(
+      titleText + ' <span class="count-badge">' + leads.length + '</span>',
+      titleCls,
+      cards
     );
-  document.getElementById('section-gewonnen').innerHTML =
-    buildSection('✅ Gewonnen <span class="count-badge">' + gewCount + '</span>', 'gewonnen', gewCards);
-  document.getElementById('section-nicht').innerHTML =
-    buildSection('📵 Nicht rangegangen <span class="count-badge">' + nichtCount + '</span>', 'nicht', nichtCards);
-  document.getElementById('section-verloren').innerHTML =
-    buildSection('❌ Verloren <span class="count-badge">' + verlCount + '</span>', 'verloren', verlCards);
+  }
 
   // Restore timers for verloren leads after page reload
   for (const lead of LEADS) {
